@@ -2,6 +2,10 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.ML;
 using Microsoft.ML.Data;
 using Microsoft.ML.Transforms.Image;
@@ -9,24 +13,98 @@ using OpenCvSharp;
 using Serilog;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Processing;
+using Azure.Storage.Blobs;
+using System.Threading;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media.Imaging;
 
 namespace ImageRecognition
 {
-    // Represents the input data schema for image classification
     public class ImageData
     {
         [LoadColumn(0)]
-        public string ImagePath;
+        public string ImagePath { get; set; }
 
         [LoadColumn(1)]
-        public string Label;
+        public string Label { get; set; }
     }
 
-    // Represents the output prediction schema
     public class ImagePrediction
     {
         [ColumnName("Score")]
-        public float[] PredictedLabels;
+        public float[] PredictedLabels { get; set; }
+    }
+
+    public class Startup
+    {
+        public void ConfigureServices(IServiceCollection services)
+        {
+            services.AddControllers();
+        }
+
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        {
+            if (env.IsDevelopment())
+            {
+                app.UseDeveloperExceptionPage();
+            }
+
+            app.UseRouting();
+
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllers();
+            });
+        }
+    }
+
+    [Route("api/[controller]")]
+    [ApiController]
+    public class ImageRecognitionController : ControllerBase
+    {
+        private readonly PredictionEngine<ImageData, ImagePrediction> _predictionEngine;
+
+        public ImageRecognitionController(PredictionEngine<ImageData, ImagePrediction> predictionEngine)
+        {
+            _predictionEngine = predictionEngine;
+        }
+
+        [HttpPost]
+        public IActionResult Predict([FromBody] ImageData imageData)
+        {
+            var prediction = _predictionEngine.Predict(imageData);
+            return Ok(prediction.PredictedLabels);
+        }
+    }
+
+    public partial class MainWindow : Window
+    {
+        private readonly PredictionEngine<ImageData, ImagePrediction> _predictionEngine;
+
+        public MainWindow(PredictionEngine<ImageData, ImagePrediction> predictionEngine)
+        {
+            InitializeComponent();
+            _predictionEngine = predictionEngine;
+        }
+
+        private async void OnSelectImage(object sender, RoutedEventArgs e)
+        {
+            var openFileDialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Filter = "Image files (*.png;*.jpg)|*.png;*.jpg"
+            };
+
+            if (openFileDialog.ShowDialog() == true)
+            {
+                var imagePath = openFileDialog.FileName;
+                var prediction = await Task.Run(() => _predictionEngine.Predict(new ImageData { ImagePath = imagePath }));
+
+                var image = new BitmapImage(new Uri(imagePath));
+                SelectedImage.Source = image;
+                PredictionLabel.Content = $"Predicted Label: {prediction.PredictedLabels[0]}";
+            }
+        }
     }
 
     class Program
@@ -41,22 +119,42 @@ namespace ImageRecognition
 
             Log.Information("Application started.");
 
-            if (args.Length == 0)
+            if (args.Contains("--server"))
             {
-                Console.WriteLine("Please provide paths to images or directories as command-line arguments.");
-                return;
+                // Run as web API server
+                CreateHostBuilder(args).Build().Run();
+            }
+            else
+            {
+                // Run as GUI application
+                var mlContext = new MLContext();
+                var model = await TrainModel(mlContext);
+
+                var predictionEngine = mlContext.Model.CreatePredictionEngine<ImageData, ImagePrediction>(model);
+
+                // Start WPF GUI
+                var app = new Application();
+                var mainWindow = new MainWindow(predictionEngine);
+                app.Run(mainWindow);
             }
 
-            // Set up MLContext
-            var mlContext = new MLContext();
+            Log.Information("Application ended.");
+        }
 
-            // Load and train the ML.NET model
+        public static IHostBuilder CreateHostBuilder(string[] args) =>
+            Host.CreateDefaultBuilder(args)
+                .ConfigureWebHostDefaults(webBuilder =>
+                {
+                    webBuilder.UseStartup<Startup>();
+                });
+
+        private static async Task<ITransformer> TrainModel(MLContext mlContext)
+        {
             var data = mlContext.Data.LoadFromTextFile<ImageData>(
                 path: "image_dataset.txt",
                 separatorChar: '\t',
                 hasHeader: true);
 
-            // Define the ML.NET pipeline for image classification
             var pipeline = mlContext.Transforms.Conversion.MapValueToKey("Label")
                 .Append(mlContext.Transforms.LoadRawImageBytes(outputColumnName: "ImageBytes", imageFolder: null, inputColumnName: "ImagePath"))
                 .Append(mlContext.Transforms.ResizeImages(outputColumnName: "Image", imageWidth: 224, imageHeight: 224, inputColumnName: "ImageBytes"))
@@ -66,48 +164,31 @@ namespace ImageRecognition
 
             var model = pipeline.Fit(data);
 
-            // Create a prediction engine to make predictions on new images
-            var predictionEngine = mlContext.Model.CreatePredictionEngine<ImageData, ImagePrediction>(model);
-
-            // Process each command-line argument
-            foreach (var arg in args)
-            {
-                if (File.Exists(arg))
-                {
-                    await ProcessImage(arg, predictionEngine);
-                }
-                else if (Directory.Exists(arg))
-                {
-                    var files = Directory.GetFiles(arg, "*.jpg").Concat(Directory.GetFiles(arg, "*.png"));
-                    foreach (var file in files)
-                    {
-                        await ProcessImage(file, predictionEngine);
-                    }
-                }
-                else
-                {
-                    Log.Error($"Path '{arg}' is neither a file nor a directory.");
-                }
-            }
-
-            Log.Information("Application ended.");
+            return model;
         }
 
-        // Function to process and predict an image
+        private static async Task<string> UploadImageToCloud(string imagePath)
+        {
+            var blobServiceClient = new BlobServiceClient("your_connection_string_here");
+            var containerClient = blobServiceClient.GetBlobContainerClient("images");
+            var blobClient = containerClient.GetBlobClient(Path.GetFileName(imagePath));
+
+            await blobClient.UploadAsync(imagePath, true);
+            return blobClient.Uri.ToString();
+        }
+
         private static async Task ProcessImage(string imagePath, PredictionEngine<ImageData, ImagePrediction> predictionEngine)
         {
             try
             {
                 Log.Information($"Processing image: {imagePath}");
 
-                // Load and augment the image
-                var image = await LoadAndAugmentImage(imagePath);
+                var augmentedPath = await LoadAndAugmentImage(imagePath);
+                var cloudImageUrl = await UploadImageToCloud(augmentedPath);
 
-                // Prepare input data for prediction
-                var imageData = new ImageData { ImagePath = imagePath };
+                var imageData = new ImageData { ImagePath = cloudImageUrl };
                 var prediction = predictionEngine.Predict(imageData);
 
-                // Display the image and prediction
                 DisplayImageWithPrediction(imagePath, prediction.PredictedLabels);
                 LogPrediction(imagePath, prediction.PredictedLabels);
 
@@ -119,7 +200,6 @@ namespace ImageRecognition
             }
         }
 
-        // Function to load and augment image using ImageSharp
         private static async Task<string> LoadAndAugmentImage(string imagePath)
         {
             using (var image = await Image.LoadAsync(imagePath))
@@ -136,10 +216,9 @@ namespace ImageRecognition
             }
         }
 
-        // Function to display image and prediction using OpenCV
         private static void DisplayImageWithPrediction(string imagePath, float[] predictedLabels)
         {
-            var label = predictedLabels.Max().ToString(); // Placeholder for actual label retrieval
+            var label = predictedLabels.Max().ToString();
 
             using (var window = new Window("Image Recognition"))
             {
@@ -151,28 +230,12 @@ namespace ImageRecognition
             }
         }
 
-        // Function to log predictions to a file
         private static void LogPrediction(string imagePath, float[] predictedLabels)
         {
             using (StreamWriter writer = new StreamWriter("predictions_log.txt", true))
             {
                 writer.WriteLine($"{DateTime.Now}: {imagePath} - {string.Join(",", predictedLabels)}");
             }
-        }
-
-        // Function to load pre-trained model and re-train with additional data
-        private static ITransformer RetrainModel(MLContext mlContext, string modelPath, IDataView additionalData)
-        {
-            var loadedModel = mlContext.Model.Load(modelPath, out var modelInputSchema);
-            var trainingPipeline = loadedModel.Transformers.Append(
-                mlContext.Transforms.Conversion.MapValueToKey("Label")
-                .Append(mlContext.Transforms.LoadRawImageBytes(outputColumnName: "ImageBytes", imageFolder: null, inputColumnName: "ImagePath"))
-                .Append(mlContext.Transforms.ResizeImages(outputColumnName: "Image", imageWidth: 224, imageHeight: 224, inputColumnName: "ImageBytes"))
-                .Append(mlContext.Transforms.ExtractPixels(outputColumnName: "Pixels", interleavePixelColors: true, offsetImage: 117))
-                .Append(mlContext.Model.LoadTensorFlowModel("model.pb").ScoreTensorFlowModel(outputColumnNames: new[] { "Score" }, inputColumnNames: new[] { "Pixels" }, addBatchDimensionInput: true))
-                .Append(mlContext.Transforms.Conversion.MapKeyToValue("PredictedLabel"))
-            );
-            return trainingPipeline.Fit(additionalData);
         }
     }
 }
