@@ -1,22 +1,27 @@
 # MLImageClassifier
 
-**Image Recognition using ML.NET, OpenCV, WPF, ASP.NET Core, and Azure Blob Storage**
+**Image Recognition using ML.NET, OpenCV, WPF, ASP.NET Core, Azure Blob Storage, and Blazor**
 
 This project demonstrates advanced image recognition using machine learning techniques with ML.NET and OpenCV. It utilizes a pre-trained model to classify images and provides real-time predictions. The project also features a graphical user interface, web API integration, cloud storage, and more.
 
 ## Features
 
-- Classify images based on pre-defined labels.
-- Load and train the ML.NET model.
-- Display images using OpenCV.
-- Continuously make predictions on new images.
-- User-friendly graphical user interface (GUI) using WPF.
-- RESTful API for making predictions via HTTP requests using ASP.NET Core.
-- Cloud storage integration with Azure Blob Storage.
-- Advanced image processing and augmentation.
-- Multi-threading for concurrent image processing.
-- Model management with versioning and retraining capabilities.
-- Dockerized deployment for easy deployment and scalability.
+- **Classify Images**: Automatically categorize products and assign relevant tags.
+- **ML Model Training**: Train and fine-tune the ML.NET model with a custom product image dataset.
+- **Real-Time Predictions**: Continuously make predictions on new images using the web API and GUI.
+- **Advanced Image Processing**: Utilize OpenCV and SixLabors.ImageSharp for image manipulation and augmentation.
+- **User-Friendly GUI**: WPF-based graphical interface for image selection and display.
+- **RESTful API**: ASP.NET Core web API for making predictions via HTTP requests.
+- **Cloud Integration**: Upload and store images in Azure Blob Storage for scalable storage solutions.
+- **Logging and Error Handling**: Comprehensive logging with Serilog for tracking application performance and errors.
+- **Multi-Threading**: Concurrent image processing for improved performance.
+- **Model Management**: Support for model versioning and retraining with new data.
+- **Docker Deployment**: Containerize the application for easy deployment and scalability.
+- **Real-Time Object Detection**: Integrated real-time object detection using YOLO with OpenCvSharp.
+- **Batch Processing**: Implemented batch image processing for large-scale operations.
+- **Web-Based Dashboard**: Blazor-based dashboard for monitoring and managing the image processing pipeline.
+- **Custom Model Training**: Interface for users to upload their own datasets and train custom models.
+- **Automated Model Evaluation**: Evaluate model performance with metrics like accuracy, precision, recall, and F1 score.
 
 ## Prerequisites
 
@@ -30,75 +35,111 @@ This project demonstrates advanced image recognition using machine learning tech
 
 ## Usage
 
-To use the Image Recognition project:
+### Setup
 
-1. Clone the repository or download the project files.
-2. Make sure you have the .NET Core SDK installed on your machine.
-3. Install the required NuGet packages:
-    - OpenCvSharp: `dotnet add package OpenCvSharp`
-    - ML.NET: `dotnet add package Microsoft.ML`
-    - Azure Storage Blob: `dotnet add package Azure.Storage.Blobs`
-    - Serilog: `dotnet add package Serilog`
-    - SixLabors.ImageSharp: `dotnet add package SixLabors.ImageSharp`
-4. Prepare your image dataset and update the `image_dataset.txt` file with the path and corresponding labels for each image.
-5. Replace the `model.pb` file with your own pre-trained TensorFlow model or use the provided model.
-6. Build the project: `dotnet build`.
+1. **Clone the Repository**:
+   ```bash
+   git clone https://github.com/yourusername/MLImageClassifier.git
+   cd MLImageClassifier
+# Installation and Setup
 
-### Running the Application
+## Install NuGet Packages
 
-#### Graphical User Interface (GUI)
+```bash
+dotnet add package OpenCvSharp
+dotnet add package Microsoft.ML
+dotnet add package Azure.Storage.Blobs
+dotnet add package Serilog
+dotnet add package SixLabors.ImageSharp
+dotnet add package Microsoft.AspNetCore.Components.WebAssembly.Server
+dotnet add package Microsoft.AspNetCore.Components.WebAssembly
+```
+
+## Prepare Dataset
+
+- Update `product_image_dataset.txt` with the path and corresponding labels for each image.
+- Replace `model.pb` with your own pre-trained TensorFlow model or use the provided model.
+
+## Build the Project
+
+```bash
+dotnet build
+```
+
+# Running the Application
+
+## Graphical User Interface (GUI)
 
 To run the application with a GUI:
 
-1. Run the application: `dotnet run`
-2. Use the GUI to select and classify images. The application will display the image and the predicted label using OpenCV.
+```bash
+dotnet run
+```
+Use the GUI: Select and classify images. The application will display the image and the predicted category using OpenCV.
 
-#### Command-Line Interface (CLI)
+## Command-Line Interface (CLI)
 
 To run the application with a command-line interface:
 
-1. Run the application: `dotnet run -- [image-path]`
-2. Enter the path to an image file when prompted. The application will classify the image and display the predicted label using OpenCV.
+```bash
+dotnet run -- [image-path]
+```
+Enter Image Path: Enter the path to an image file when prompted. The application will classify the image and display the predicted category using OpenCV.
 
-#### Web API
+## Web API
 
 To run the application as a web API:
 
-1. Run the application with the server flag: `dotnet run --server`
-2. Use a tool like Postman to send POST requests with image data to the API endpoint: `http://localhost:5000/api/ImageRecognition`
+```bash
+dotnet run --server
+```
+Use Postman or Curl: Send POST requests with image data to the API endpoint:
 
-### Docker Deployment
+```bash
+curl -X POST "http://localhost:5000/api/ImageRecognition" -H "Content-Type: application/json" -d '{"ImagePath":"path/to/image.jpg"}'
+```
 
-To deploy the application using Docker:
+## Web-Based Dashboard
 
-1. Build the Docker image: `docker build -t mlimageclassifier .`
-2. Run the Docker container: `docker run -p 5000:80 mlimageclassifier`
+To run the Blazor-based web dashboard:
 
+```bash
+dotnet run --dashboard
+```
+Access the Dashboard: Open your web browser and go to `http://localhost:5000` to use the Blazor-based dashboard for monitoring and managing the image processing pipeline.
+
+# Docker Deployment
+
+## Build Docker Image
+
+```bash
+docker build -t mlimageclassifier .
+```
+
+## Run Docker Container
+
+```bash
+docker run -p 5000:80 mlimageclassifier
+```
 The application will be accessible via `http://localhost:5000`.
 
-## Advanced Features
+# Advanced Features
 
-### Cloud Storage
+## Real-Time Object Detection
 
-The application supports cloud storage integration with Azure Blob Storage. Images are uploaded to Azure Blob Storage before classification.
+The application includes real-time object detection using YOLO and OpenCvSharp. This feature allows for the detection and labeling of objects in real-time using a webcam feed.
 
-### Logging and Error Handling
+## Batch Processing
 
-The application uses Serilog for comprehensive logging and error handling. Logs are written to both console and files.
+Batch image processing is implemented to handle large-scale operations. This allows for the concurrent processing of multiple images, improving efficiency and scalability.
 
-### Multi-threading
+## Custom Model Training
 
-The application uses multi-threading to process multiple images concurrently, improving performance and efficiency.
+Users can upload their own datasets and train custom models through the application. This feature allows for the flexibility to adapt the model to specific requirements and data.
 
-### Model Management
+## Automated Model Evaluation
 
-The application includes model management features, allowing for model versioning and retraining with additional data.
-
-### Image Processing and Augmentation
-
-The application uses SixLabors.ImageSharp for advanced image processing and augmentation, ensuring high-quality inputs for the model.
-
-Feel free to further customize the code, add error handling, or incorporate additional features based on your requirements.
+The application includes automated model evaluation capabilities, providing metrics such as accuracy, precision, recall, and F1 score. This ensures that the model's performance can be tracked and improved over time.
 
 For more information and detailed instructions, refer to the project's documentation.
 
