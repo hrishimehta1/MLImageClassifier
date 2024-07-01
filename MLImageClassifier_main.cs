@@ -18,19 +18,23 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
+using System.Collections.Generic;
 
-namespace ImageRecognition
+namespace RetailImageRecognition
 {
-    public class ImageData
+    public class ProductImageData
     {
         [LoadColumn(0)]
         public string ImagePath { get; set; }
 
         [LoadColumn(1)]
-        public string Label { get; set; }
+        public string ProductCategory { get; set; }
+
+        [LoadColumn(2)]
+        public string ProductTags { get; set; }
     }
 
-    public class ImagePrediction
+    public class ProductImagePrediction
     {
         [ColumnName("Score")]
         public float[] PredictedLabels { get; set; }
@@ -41,6 +45,8 @@ namespace ImageRecognition
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddControllers();
+            services.AddRazorPages(); // For Blazor WebAssembly
+            services.AddServerSideBlazor(); // For Blazor Server
         }
 
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
@@ -55,6 +61,8 @@ namespace ImageRecognition
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapControllers();
+                endpoints.MapBlazorHub(); // For Blazor Server
+                endpoints.MapFallbackToPage("/_Host"); // For Blazor WebAssembly
             });
         }
     }
@@ -63,26 +71,28 @@ namespace ImageRecognition
     [ApiController]
     public class ImageRecognitionController : ControllerBase
     {
-        private readonly PredictionEngine<ImageData, ImagePrediction> _predictionEngine;
+        private readonly PredictionEngine<ProductImageData, ProductImagePrediction> _predictionEngine;
 
-        public ImageRecognitionController(PredictionEngine<ImageData, ImagePrediction> predictionEngine)
+        public ImageRecognitionController(PredictionEngine<ProductImageData, ProductImagePrediction> predictionEngine)
         {
             _predictionEngine = predictionEngine;
         }
 
         [HttpPost]
-        public IActionResult Predict([FromBody] ImageData imageData)
+        public IActionResult Predict([FromBody] ProductImageData imageData)
         {
             var prediction = _predictionEngine.Predict(imageData);
-            return Ok(prediction.PredictedLabels);
+            var categories = new List<string> { "Electronics", "Clothing", "HomeGoods" }; // Example categories
+            var predictedCategory = categories[Array.IndexOf(prediction.PredictedLabels, prediction.PredictedLabels.Max())];
+            return Ok(new { Category = predictedCategory, Tags = imageData.ProductTags });
         }
     }
 
     public partial class MainWindow : Window
     {
-        private readonly PredictionEngine<ImageData, ImagePrediction> _predictionEngine;
+        private readonly PredictionEngine<ProductImageData, ProductImagePrediction> _predictionEngine;
 
-        public MainWindow(PredictionEngine<ImageData, ImagePrediction> predictionEngine)
+        public MainWindow(PredictionEngine<ProductImageData, ProductImagePrediction> predictionEngine)
         {
             InitializeComponent();
             _predictionEngine = predictionEngine;
@@ -98,11 +108,11 @@ namespace ImageRecognition
             if (openFileDialog.ShowDialog() == true)
             {
                 var imagePath = openFileDialog.FileName;
-                var prediction = await Task.Run(() => _predictionEngine.Predict(new ImageData { ImagePath = imagePath }));
+                var prediction = await Task.Run(() => _predictionEngine.Predict(new ProductImageData { ImagePath = imagePath }));
 
                 var image = new BitmapImage(new Uri(imagePath));
                 SelectedImage.Source = image;
-                PredictionLabel.Content = $"Predicted Label: {prediction.PredictedLabels[0]}";
+                PredictionLabel.Content = $"Predicted Category: {prediction.PredictedLabels[0]}";
             }
         }
     }
@@ -124,13 +134,18 @@ namespace ImageRecognition
                 // Run as web API server
                 CreateHostBuilder(args).Build().Run();
             }
+            else if (args.Contains("--dashboard"))
+            {
+                // Run Blazor server for the dashboard
+                CreateHostBuilder(args).Build().Run();
+            }
             else
             {
                 // Run as GUI application
                 var mlContext = new MLContext();
                 var model = await TrainModel(mlContext);
 
-                var predictionEngine = mlContext.Model.CreatePredictionEngine<ImageData, ImagePrediction>(model);
+                var predictionEngine = mlContext.Model.CreatePredictionEngine<ProductImageData, ProductImagePrediction>(model);
 
                 // Start WPF GUI
                 var app = new Application();
@@ -150,12 +165,12 @@ namespace ImageRecognition
 
         private static async Task<ITransformer> TrainModel(MLContext mlContext)
         {
-            var data = mlContext.Data.LoadFromTextFile<ImageData>(
-                path: "image_dataset.txt",
+            var data = mlContext.Data.LoadFromTextFile<ProductImageData>(
+                path: "product_image_dataset.txt",
                 separatorChar: '\t',
                 hasHeader: true);
 
-            var pipeline = mlContext.Transforms.Conversion.MapValueToKey("Label")
+            var pipeline = mlContext.Transforms.Conversion.MapValueToKey("ProductCategory")
                 .Append(mlContext.Transforms.LoadRawImageBytes(outputColumnName: "ImageBytes", imageFolder: null, inputColumnName: "ImagePath"))
                 .Append(mlContext.Transforms.ResizeImages(outputColumnName: "Image", imageWidth: 224, imageHeight: 224, inputColumnName: "ImageBytes"))
                 .Append(mlContext.Transforms.ExtractPixels(outputColumnName: "Pixels", interleavePixelColors: true, offsetImage: 117))
@@ -170,14 +185,14 @@ namespace ImageRecognition
         private static async Task<string> UploadImageToCloud(string imagePath)
         {
             var blobServiceClient = new BlobServiceClient("your_connection_string_here");
-            var containerClient = blobServiceClient.GetBlobContainerClient("images");
+            var containerClient = blobServiceClient.GetBlobContainerClient("product-images");
             var blobClient = containerClient.GetBlobClient(Path.GetFileName(imagePath));
 
             await blobClient.UploadAsync(imagePath, true);
             return blobClient.Uri.ToString();
         }
 
-        private static async Task ProcessImage(string imagePath, PredictionEngine<ImageData, ImagePrediction> predictionEngine)
+        private static async Task ProcessImage(string imagePath, PredictionEngine<ProductImageData, ProductImagePrediction> predictionEngine)
         {
             try
             {
@@ -186,7 +201,7 @@ namespace ImageRecognition
                 var augmentedPath = await LoadAndAugmentImage(imagePath);
                 var cloudImageUrl = await UploadImageToCloud(augmentedPath);
 
-                var imageData = new ImageData { ImagePath = cloudImageUrl };
+                var imageData = new ProductImageData { ImagePath = cloudImageUrl };
                 var prediction = predictionEngine.Predict(imageData);
 
                 DisplayImageWithPrediction(imagePath, prediction.PredictedLabels);
@@ -235,6 +250,81 @@ namespace ImageRecognition
             using (StreamWriter writer = new StreamWriter("predictions_log.txt", true))
             {
                 writer.WriteLine($"{DateTime.Now}: {imagePath} - {string.Join(",", predictedLabels)}");
+            }
+        }
+
+        // Real-time Object Detection using YOLO
+        private static void RunObjectDetection()
+        {
+            var net = CvDnn.ReadNetFromDarknet("yolov3.cfg", "yolov3.weights");
+            var layerNames = net.GetLayerNames();
+            var outLayerNames = net.GetUnconnectedOutLayersNames();
+            using (var cap = new VideoCapture(0))
+            {
+                if (!cap.IsOpened())
+                {
+                    throw new Exception("Camera not accessible");
+                }
+
+                var frame = new Mat();
+                while (true)
+                {
+                    cap.Read(frame);
+                    if (frame.Empty())
+                    {
+                        break;
+                    }
+
+                    var blob = CvDnn.BlobFromImage(frame, 1 / 255.0, new OpenCvSharp.Size(416, 416), new Scalar(0, 0, 0), true, false);
+                    net.SetInput(blob);
+                    var outputs = new Mat[outLayerNames.Length];
+                    net.Forward(outputs, outLayerNames);
+
+                    var classIds = new List<int>();
+                    var confidences = new List<float>();
+                    var boxes = new List<Rect2d>();
+
+                    for (int i = 0; i < outputs.Length; i++)
+                    {
+                        var output = outputs[i];
+                        for (int j = 0; j < output.Rows; j++)
+                        {
+                            var scores = output.Row(j).ColRange(5, output.Cols);
+                            Cv2.MinMaxLoc(scores, out _, out Point max);
+                            var confidence = scores.At<float>(max.Y);
+
+                            if (confidence > 0.5)
+                            {
+                                var centerX = (int)(output.At<float>(j, 0) * frame.Cols);
+                                var centerY = (int)(output.At<float>(j, 1) * frame.Rows);
+                                var width = (int)(output.At<float>(j, 2) * frame.Cols);
+                                var height = (int)(output.At<float>(j, 3) * frame.Rows);
+                                var left = centerX - width / 2;
+                                var top = centerY - height / 2;
+
+                                classIds.Add(max.Y);
+                                confidences.Add(confidence);
+                                boxes.Add(new Rect2d(left, top, width, height));
+                            }
+                        }
+                    }
+
+                    var indices = new List<int>();
+                    CvDnn.NMSBoxes(boxes, confidences, 0.5f, 0.4f, indices);
+                    foreach (var idx in indices)
+                    {
+                        var box = boxes[idx];
+                        Cv2.Rectangle(frame, box, Scalar.Red, 2);
+                        var label = $"ID: {classIds[idx]}, Conf: {confidences[idx]:0.00}";
+                        Cv2.PutText(frame, label, new Point((int)box.X, (int)box.Y - 10), HersheyFonts.HersheySimplex, 0.5, Scalar.Green, 2);
+                    }
+
+                    Cv2.ImShow("Object Detection", frame);
+                    if (Cv2.WaitKey(1) == 27) // ESC key
+                    {
+                        break;
+                    }
+                }
             }
         }
     }
