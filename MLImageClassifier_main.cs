@@ -47,17 +47,18 @@ namespace RetailImageRecognition
             services.AddControllers();
             services.AddRazorPages(); // For Blazor WebAssembly
             services.AddServerSideBlazor(); // For Blazor Server
+            services.AddSingleton<PredictionEnginePool<ProductImageData, ProductImagePrediction>>();
         }
-
+    
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
         {
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
             }
-
+    
             app.UseRouting();
-
+    
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapControllers();
@@ -65,51 +66,53 @@ namespace RetailImageRecognition
                 endpoints.MapFallbackToPage("/_Host"); // For Blazor WebAssembly
             });
         }
-    }
+     }
+
 
     [Route("api/[controller]")]
     [ApiController]
     public class ImageRecognitionController : ControllerBase
     {
-        private readonly PredictionEngine<ProductImageData, ProductImagePrediction> _predictionEngine;
-
-        public ImageRecognitionController(PredictionEngine<ProductImageData, ProductImagePrediction> predictionEngine)
+        private readonly PredictionEnginePool<ProductImageData, ProductImagePrediction> _predictionEnginePool;
+    
+        public ImageRecognitionController(PredictionEnginePool<ProductImageData, ProductImagePrediction> predictionEnginePool)
         {
-            _predictionEngine = predictionEngine;
+            _predictionEnginePool = predictionEnginePool;
         }
-
+    
         [HttpPost]
-        public IActionResult Predict([FromBody] ProductImageData imageData)
+        public async Task<IActionResult> Predict([FromBody] ProductImageData imageData)
         {
-            var prediction = _predictionEngine.Predict(imageData);
+            var prediction = await Task.Run(() => _predictionEnginePool.Predict(imageData));
             var categories = new List<string> { "Electronics", "Clothing", "HomeGoods" }; // Example categories
             var predictedCategory = categories[Array.IndexOf(prediction.PredictedLabels, prediction.PredictedLabels.Max())];
             return Ok(new { Category = predictedCategory, Tags = imageData.ProductTags });
         }
     }
 
+
     public partial class MainWindow : Window
     {
-        private readonly PredictionEngine<ProductImageData, ProductImagePrediction> _predictionEngine;
-
-        public MainWindow(PredictionEngine<ProductImageData, ProductImagePrediction> predictionEngine)
+        private readonly PredictionEnginePool<ProductImageData, ProductImagePrediction> _predictionEnginePool;
+    
+        public MainWindow(PredictionEnginePool<ProductImageData, ProductImagePrediction> predictionEnginePool)
         {
             InitializeComponent();
-            _predictionEngine = predictionEngine;
+            _predictionEnginePool = predictionEnginePool;
         }
-
+    
         private async void OnSelectImage(object sender, RoutedEventArgs e)
         {
             var openFileDialog = new Microsoft.Win32.OpenFileDialog
             {
                 Filter = "Image files (*.png;*.jpg)|*.png;*.jpg"
             };
-
+    
             if (openFileDialog.ShowDialog() == true)
             {
                 var imagePath = openFileDialog.FileName;
-                var prediction = await Task.Run(() => _predictionEngine.Predict(new ProductImageData { ImagePath = imagePath }));
-
+                var prediction = await Task.Run(() => _predictionEnginePool.Predict(new ProductImageData { ImagePath = imagePath }));
+    
                 var image = new BitmapImage(new Uri(imagePath));
                 SelectedImage.Source = image;
                 PredictionLabel.Content = $"Predicted Category: {prediction.PredictedLabels[0]}";
@@ -126,9 +129,9 @@ namespace RetailImageRecognition
                 .WriteTo.Console()
                 .WriteTo.File("logs/log-.txt", rollingInterval: RollingInterval.Day)
                 .CreateLogger();
-
+    
             Log.Information("Application started.");
-
+    
             if (args.Contains("--server"))
             {
                 // Run as web API server
@@ -144,41 +147,41 @@ namespace RetailImageRecognition
                 // Run as GUI application
                 var mlContext = new MLContext();
                 var model = await TrainModel(mlContext);
-
-                var predictionEngine = mlContext.Model.CreatePredictionEngine<ProductImageData, ProductImagePrediction>(model);
-
+    
+                var predictionEnginePool = mlContext.Model.CreatePredictionEnginePool<ProductImageData, ProductImagePrediction>(model);
+    
                 // Start WPF GUI
                 var app = new Application();
-                var mainWindow = new MainWindow(predictionEngine);
+                var mainWindow = new MainWindow(predictionEnginePool);
                 app.Run(mainWindow);
             }
-
+    
             Log.Information("Application ended.");
         }
-
+    
         public static IHostBuilder CreateHostBuilder(string[] args) =>
             Host.CreateDefaultBuilder(args)
                 .ConfigureWebHostDefaults(webBuilder =>
                 {
                     webBuilder.UseStartup<Startup>();
                 });
-
+    
         private static async Task<ITransformer> TrainModel(MLContext mlContext)
         {
             var data = mlContext.Data.LoadFromTextFile<ProductImageData>(
                 path: "product_image_dataset.txt",
                 separatorChar: '\t',
                 hasHeader: true);
-
+    
             var pipeline = mlContext.Transforms.Conversion.MapValueToKey("ProductCategory")
                 .Append(mlContext.Transforms.LoadRawImageBytes(outputColumnName: "ImageBytes", imageFolder: null, inputColumnName: "ImagePath"))
                 .Append(mlContext.Transforms.ResizeImages(outputColumnName: "Image", imageWidth: 224, imageHeight: 224, inputColumnName: "ImageBytes"))
                 .Append(mlContext.Transforms.ExtractPixels(outputColumnName: "Pixels", interleavePixelColors: true, offsetImage: 117))
                 .Append(mlContext.Model.LoadTensorFlowModel("model.pb").ScoreTensorFlowModel(outputColumnNames: new[] { "Score" }, inputColumnNames: new[] { "Pixels" }, addBatchDimensionInput: true))
                 .Append(mlContext.Transforms.Conversion.MapKeyToValue("PredictedLabel"));
-
+    
             var model = pipeline.Fit(data);
-
+    
             return model;
         }
 
